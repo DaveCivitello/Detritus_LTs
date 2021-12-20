@@ -68,7 +68,7 @@ contrast_groups = function(contrast_matrix){
   group_labels = rep("", times=length(trts))
   label_letters = letters[1:length(trts)]
   which_letter = 1
-  for(i in 1:(length(trts)-1)){
+  for(i in 1:(length(trts))){
     pvals = contrast_matrix[i,]
     pvals[1:i] = 0 # avoids double comparing previous treatments or itself to itself
     already_match = str_detect(group_labels, paste0("[", "z" , group_labels[i], "]"))
@@ -76,8 +76,12 @@ contrast_groups = function(contrast_matrix){
     if(length(new_matches) > 0){
       group_labels[c(i, new_matches)] = paste0(group_labels[c(i, new_matches)], label_letters[which_letter])
       which_letter = which_letter + 1
+    }else{
+      if(group_labels[i] == ""){group_labels[i] = paste0(group_labels[i], label_letters[which_letter])
+      which_letter = which_letter + 1}
     }
   }
+  #if(group_labels[length(trts)] == ""){group_labels[length(trts)] = label_letters[which_letter]}
   data.frame(trts, group_labels)
 }
 
