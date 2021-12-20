@@ -19,6 +19,7 @@ library(glmmTMB)
 library(ggplot2)
 library(cowplot)
 library(emmeans)
+library(stringr)
 theme_set(theme_cowplot())
 ```
 
@@ -45,21 +46,40 @@ snails[,"Food"] <- factor(snails[,"Food"], levels = c("Lab food", "Azolla", "Duc
 ```{r per_week_analysis}
 snails[,"Cerc_wk"] = snails[,"Cerc"]/(snails[,"Alive"]-3)
 snails[,"Egg_wk"] = snails[,"Eggs"]/(snails[,"Alive"])
-snails
 
 Lengths = lm(Length ~ Infected*Food, data=snails)
-summary(Lengths)
-emmeans(Lengths, pairwise ~ Infected*Food)
-
+#summary(Lengths)
+contrast_matrix_L = pwpm(emmeans(Lengths, pairwise ~ Food*Infected)$emmeans)
 
 Eggs = lm(log(Egg_wk+1) ~ Infected*Food, data=snails)
-summary(Eggs)
-emmeans(Eggs, pairwise ~ Infected*Food)
+#summary(Eggs)
+contrast_matrix_E = pwpm(emmeans(Eggs, pairwise ~ Food*Infected)$emmeans)
 
 Cercs = lm(log(Cerc_wk+1) ~ Food, data=subset(snails, Infected=="Y"))
-summary(Cercs)
-emmeans(Cercs, pairwise ~ Food)
+#summary(Cercs)
+contrast_matrix_C = pwpm(emmeans(Cercs, pairwise ~ Food)$emmeans)
 
+
+```
+
+```{r}
+contrast_groups = function(contrast_matrix){
+  trts = rownames(contrast_matrix)
+  group_labels = rep("", times=length(trts))
+  label_letters = letters[1:length(trts)]
+  which_letter = 1
+  for(i in 1:(length(trts)-1)){
+    pvals = contrast_matrix[i,]
+    pvals[1:i] = 0 # avoids double comparing previous treatments or itself to itself
+    already_match = str_detect(group_labels, paste0("[", "z" , group_labels[i], "]"))
+    new_matches = which(pvals > 0.05 & !already_match)
+    if(length(new_matches) > 0){
+      group_labels[c(i, new_matches)] = paste0(group_labels[c(i, new_matches)], label_letters[which_letter])
+      which_letter = which_letter + 1
+    }
+  }
+  data.frame(trts, group_labels)
+}
 
 ```
 
@@ -83,6 +103,12 @@ treatments = full_join(treatments, SE_C, by=c("Food", "Infected"))
 treatments = rename(treatments, Cercs = Cerc_wk.x)
 treatments = rename(treatments, Cercs_SE = Cerc_wk.y)
 treatments[,"Infected"] = ifelse(treatments[,"Infected"] == "N", "No", "Yes")
+
+
+treatments[,"L_labs"] = contrast_groups(contrast_matrix_L)$group_labels
+treatments[,"E_labs"] = contrast_groups(contrast_matrix_E)$group_labels
+treatments[,"C_labs"] = c(rep(NA, times=5), contrast_groups(contrast_matrix_C)$group_labels)
+
 treatments
 
 ```
@@ -99,7 +125,7 @@ pL = ggplot(data=treatments, aes(x=Food, y=Length, shape=Infected, fill=Infected
         axis.title.x = element_blank(), axis.text.x = element_blank(),
         axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
   geom_linerange(aes(ymin=Length - Length_SE, ymax=Length + Length_SE), position = position_dodge(width=0.3)) +
-  geom_point(position = position_dodge(width=0.3)) +
+  geom_point(position = position_dodge(width=0.3)) + geom_text(aes(label=L_labs), position = position_dodge(width=1.2)) +
   scale_shape_manual(values=c(21, 21)) + scale_fill_manual(values = c("white", "black")) + ylim(c(0,20))
 
 pE = ggplot(data=treatments, aes(x=Food, y=Eggs, shape=Infected, fill=Infected)) + 
@@ -109,10 +135,10 @@ pE = ggplot(data=treatments, aes(x=Food, y=Eggs, shape=Infected, fill=Infected))
         axis.title.x = element_blank(), axis.text.x = element_blank(),
         axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
   geom_linerange(aes(ymin=Eggs - Eggs_SE, ymax=Eggs + Eggs_SE), position = position_dodge(width=0.3)) +
-  geom_point(position = position_dodge(width=0.3)) +
+  geom_point(position = position_dodge(width=0.3)) + geom_text(aes(label=E_labs), position = position_dodge(width=1.1)) +
   scale_shape_manual(values=c(21, 21)) + scale_fill_manual(values = c("white", "black"))
 
-pC = ggplot(data=treatments, aes(x=Food, y=Cercs)) + geom_point() +
+pC = ggplot(data=treatments, aes(x=Food, y=Cercs)) + geom_point() + geom_text(aes(label=C_labs), nudge_x = 0.2) +
   theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
   theme(legend.position="none", 
         axis.ticks.length = unit(-1.5, "mm"),
