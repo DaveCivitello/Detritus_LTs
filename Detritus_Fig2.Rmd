@@ -60,11 +60,11 @@ snails[,"Egg_wk"] = snails[,"Eggs"]/(snails[,"Alive"])
 
 Lengths = lm(Length ~ Infected*Food, data=snails)
 #summary(Lengths)
-contrast_matrix_L = emmeans(Lengths, pairwise ~ Food*Infected)
+contrast_matrix_L = emmeans(Lengths, pairwise ~ Food|Infected)
 
 Eggs = lm(log(Egg_wk+1) ~ Infected*Food, data=snails)
 #summary(Eggs)
-contrast_matrix_E = emmeans(Eggs, pairwise ~ Food*Infected)
+contrast_matrix_E = emmeans(Eggs, pairwise ~ Food|Infected)
 
 Cercs = lm(log(Cerc_wk+1) ~ Food, data=subset(snails, Infected=="Y"))
 #summary(Cercs)
@@ -72,38 +72,13 @@ contrast_matrix_C = emmeans(Cercs, pairwise ~ Food)$emmeans
 
 Dead = survreg(Surv(time=Alive, time2=First_dead, event=Status, type="interval") ~ Infected*Food, data=snails)
 #summary(Dead)
-contrast_matrix_D = emmeans(Dead, pairwise ~ Food*Infected) 
-
-```
-
-
-```{r}
-contrast_groups = function(contrast_matrix){
-  trts = rownames(contrast_matrix)
-  group_labels = rep("", times=length(trts))
-  label_letters = letters[1:length(trts)]
-  which_letter = 1
-  for(i in 1:(length(trts))){
-    pvals = contrast_matrix[i,]
-    pvals[1:i] = 0 # avoids double comparing previous treatments or itself to itself
-    already_match = str_detect(group_labels, paste0("[", "z" , group_labels[i], "]"))
-    new_matches = which(pvals > 0.05 & !already_match)
-    if(length(new_matches) > 0){
-      group_labels[c(i, new_matches)] = paste0(group_labels[c(i, new_matches)], label_letters[which_letter])
-      which_letter = which_letter + 1
-    }else{
-      if(group_labels[i] == ""){group_labels[i] = paste0(group_labels[i], label_letters[which_letter])
-      which_letter = which_letter + 1}
-    }
-  }
-  #if(group_labels[length(trts)] == ""){group_labels[length(trts)] = label_letters[which_letter]}
-  data.frame(trts, group_labels)
-}
+contrast_matrix_D = emmeans(Dead, pairwise ~ Food|Infected) 
 
 ```
 
 ## Generating treatment summaries - means & SEs
 ```{r treatments}
+# Get means and SEs
 # Get means and SEs
 meanL = aggregate(Length ~ Food*Infected, FUN=mean, data=snails)
 meanE = aggregate(Egg_wk ~ Food*Infected, FUN=mean, data=snails)
@@ -121,15 +96,24 @@ treatments = full_join(treatments, SE_C, by=c("Food", "Infected"))
 treatments = rename(treatments, Cercs = Cerc_wk.x)
 treatments = rename(treatments, Cercs_SE = Cerc_wk.y)
 treatments[,"Infected"] = ifelse(treatments[,"Infected"] == "N", "No", "Yes")
-treatments[,"Surv"] = data.frame(emmeans(Dead, pairwise ~ Food*Infected, type="response")$emmeans)$response
-treatments[,"Surv_SE"] = data.frame(emmeans(Dead, pairwise ~ Food*Infected, type="response")$emmeans)$SE
 
-treatments[,"L_labs"] = str_remove_all(cld(contrast_matrix_L, Letters=letters, sort=F)$.group, " ")
-treatments[,"E_labs"] = str_remove_all(cld(contrast_matrix_E, Letters=letters, sort=F)$.group, " ")
-treatments[,"C_labs"] = str_remove_all(c(rep(NA, times=4), cld(contrast_matrix_C, Letters=letters, sort=F)$.group), " ")
-treatments[,"S_labs"] = str_remove_all(cld(contrast_matrix_D, Letters=letters, sort=F)$.group, " ")
+# survival through end of experiment
+meanS = aggregate(1 - Status/3 ~ Food*Infected, FUN=mean, data=snails)
+N = aggregate(Status ~ Food*Infected, FUN=length, data=snails)
+colnames(meanS)[3] = "P_survival"
 
-treatments
+SE_S = sqrt(meanS$P_survival*(1 - meanS$P_survival)/N$Status)
+
+
+treatments[,"Surv"] = meanS[,"P_survival"]
+treatments[,"Surv_SE"] = SE_S
+# treatments[,"Surv"] = data.frame(emmeans(Dead, pairwise ~ Food*Infected, type="response")$emmeans)$response
+# treatments[,"Surv_SE"] = data.frame(emmeans(Dead, pairwise ~ Food*Infected, type="response")$emmeans)$SE
+
+treatments[,"L_labs"] = str_trim(cld(contrast_matrix_L, Letters=letters, sort=F)$.group, "both")
+treatments[,"E_labs"] = str_trim(cld(contrast_matrix_E, Letters=letters, sort=F)$.group, "both")
+treatments[,"C_labs"] = str_trim(c(rep(NA, times=4), cld(contrast_matrix_C, Letters=letters, sort=F)$.group), "both")
+treatments[,"S_labs"] = str_trim(cld(contrast_matrix_D, Letters=letters, sort=F)$.group, "both")
 
 ```
 
@@ -137,30 +121,46 @@ treatments
 ## Building Plots
 
 ```{r plots}
-pL = ggplot(data=treatments, aes(x=Food, y=Length, shape=Infected, fill=Infected)) + 
-  theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
-  theme(legend.position=c(0.85, 0.2), legend.title=element_text(size=10), legend.text=element_text(size=9), legend.spacing.x = unit(0, "cm"), 
-        legend.spacing.y = unit(0, "cm"),
-        axis.ticks.length = unit(-1.5, "mm"),
-        axis.title.x = element_blank(), axis.text.x = element_blank(),
-        axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
-  geom_linerange(aes(ymin=Length - Length_SE, ymax=Length + Length_SE), position = position_dodge(width=0.2)) +
-  geom_point(position = position_dodge(width=0.2)) + geom_text(aes(label=L_labs, 
-    hjust=rep(c(1, 0), each=4)), position = position_dodge(width=0.5)) +
-  scale_shape_manual(values=c(21, 21)) + scale_fill_manual(values = c("white", "black")) + ylim(c(0,20))
+inf.only = subset(treatments, Infected == "Yes")
+un.only = subset(treatments, Infected == "No")
 
-pE = ggplot(data=treatments, aes(x=Food, y=Eggs, shape=Infected, fill=Infected)) + 
+pLI = ggplot(data=inf.only, aes(x=Food, y=Length)) + 
   theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
   theme(legend.position="none",
         axis.ticks.length = unit(-1.5, "mm"),
         axis.title.x = element_blank(), axis.text.x = element_blank(),
         axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
-  geom_linerange(aes(ymin=Eggs - Eggs_SE, ymax=Eggs + Eggs_SE), position = position_dodge(width=0.3)) +
-  geom_point(position = position_dodge(width=0.3)) + geom_text(aes(label=E_labs, 
-    hjust=rep(c(1, 0), each=4)), position = position_dodge(width=0.6)) +
-  scale_shape_manual(values=c(21, 21)) + scale_fill_manual(values = c("white", "black")) + ylim(c(-5,60))
+  geom_linerange(aes(ymin=Length - Length_SE, ymax=Length + Length_SE)) +
+  geom_point() + geom_text(aes(label=L_labs, hjust=0), nudge_x = 0.2, nudge_y = 0, hjust=0) + ylim(c(0,20)) 
 
-pC = ggplot(data=treatments, aes(x=Food, y=Cercs)) + geom_point() + geom_text(aes(label=C_labs), nudge_x = 0.15) +
+pLU = ggplot(data=un.only, aes(x=Food, y=Length)) + 
+  theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
+  theme(legend.position="none",
+        axis.ticks.length = unit(-1.5, "mm"),
+        axis.title.x = element_blank(), axis.text.x = element_blank(),
+        axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
+  geom_linerange(aes(ymin=Length - Length_SE, ymax=Length + Length_SE)) +
+  geom_point() + geom_text(aes(label=L_labs, hjust=0), nudge_x = 0.2, nudge_y = 0) + ylim(c(0,20))
+
+pEI = ggplot(data=inf.only, aes(x=Food, y=Eggs)) + 
+  theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
+  theme(legend.position="none",
+        axis.ticks.length = unit(-1.5, "mm"),
+        axis.title.x = element_blank(), axis.text.x = element_blank(),
+        axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
+  geom_linerange(aes(ymin=Eggs - Eggs_SE, ymax=Eggs + Eggs_SE)) +
+  geom_point() + geom_text(aes(label=E_labs, hjust=0), nudge_x = 0.2, nudge_y = 0) + ylim(c(0,75))
+
+pEU = ggplot(data=un.only, aes(x=Food, y=Eggs)) + 
+  theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
+  theme(legend.position="none",
+        axis.ticks.length = unit(-1.5, "mm"),
+        axis.title.x = element_blank(), axis.text.x = element_blank(),
+        axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
+  geom_linerange(aes(ymin=Eggs - Eggs_SE, ymax=Eggs + Eggs_SE)) +
+  geom_point() + geom_text(aes(label=E_labs, hjust=0), nudge_x = 0.2, nudge_y = 0) + ylim(c(0,75))
+
+pC = ggplot(data=treatments, aes(x=Food, y=Cercs)) + geom_point() + geom_text(aes(label=C_labs, hjust=0), nudge_x = 0.2) +
   theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
   theme(legend.position="none", 
         axis.ticks.length = unit(-1.5, "mm"),
@@ -168,39 +168,68 @@ pC = ggplot(data=treatments, aes(x=Food, y=Cercs)) + geom_point() + geom_text(ae
         axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + ylim(c(0,2000)) +
   geom_linerange(aes(ymin=Cercs - Cercs_SE, ymax=Cercs + Cercs_SE)) 
 
-pD = ggplot(data=treatments, aes(x=Food, y=Surv, shape=Infected, fill=Infected)) + 
+pDI = ggplot(data=inf.only, aes(x=Food, y=Surv)) + 
   theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
   theme(legend.position="none",
         axis.ticks.length = unit(-1.5, "mm"),
-        axis.title.x = element_blank(), axis.text.x = element_text(size=8, margin = margin(t=3)),
+        axis.title.x = element_blank(), axis.text.x = element_blank(),
         axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
-  geom_linerange(aes(ymin=Surv - Surv_SE, ymax=Surv + Surv_SE), position = position_dodge(width=0.3)) +
-  geom_point(position = position_dodge(width=0.3)) + geom_text(aes(label=S_labs, 
-    hjust=rep(c(1, 0), each=4)), position = position_dodge(width=0.6)) +
-  scale_shape_manual(values=c(21, 21)) + scale_fill_manual(values = c("white", "black")) +
-  scale_x_discrete(labels =  c("2 days", "21 days", "49 days", "Lab\nfood"))
+  geom_linerange(aes(ymin=Surv - Surv_SE, ymax=Surv + Surv_SE)) + ylim(c(0,1)) +
+  geom_point() + geom_text(aes(label=S_labs, hjust=0), nudge_x = 0.2, nudge_y = 0) + ylim(c(0,1.05)) +
+  scale_x_discrete(labels =  c("Lab\nfood", "Duckweed", "Water\nfern", "Water\nhyacinth", "Water\nlettuce"))
 
+pDU = ggplot(data=un.only, aes(x=Food, y=Surv)) + 
+  theme(plot.margin = unit(c(0, 0.25, 0.75, 0.75), "cm")) + 
+  theme(legend.position="none",
+        axis.ticks.length = unit(-1.5, "mm"),
+        axis.title.x = element_blank(), axis.text.x = element_blank(),
+        axis.title.y = element_blank(), axis.text.y = element_text(size=8, margin = margin(r=3))) + 
+  geom_linerange(aes(ymin=Surv - Surv_SE, ymax=Surv + Surv_SE)) + ylim(c(0,1)) +
+  geom_point() + geom_text(aes(label=S_labs, hjust=0), nudge_x = 0.2, nudge_y = 0) + ylim(c(0,1.05)) +
+  scale_x_discrete(labels =  c("Lab\nfood", "Duckweed", "Water\nfern", "Water\nhyacinth", "Water\nlettuce"))
 
-```
+spacer = ggplot(data=un.only, aes(x=Food, y=Surv)) +
+  geom_blank() + theme_void()
 
-
-```{r plot_grid}
-Fig2 = plot_grid(pL, pE, pC, pD, align="v", ncol=1, nrow=4, axis="rltb", scale=1) +
+Fig1 = plot_grid(spacer, spacer,
+                 pLI, pLU,
+                 pEI, pEU,
+                 pDI, pDU,
+                 pC, spacer,
+                 spacer, spacer,
+                 align="v", ncol=2, nrow=6, axis="rltb", rel_heights=c(0.1, 1, 1, 1, 1, 0.1)) +
+  # Column labels
+  draw_label("Infected", x=0.33, y=0.99) +
+  draw_label("Uninfected", x=0.825, y=0.99) +
   # y-axis labels
-  draw_label("Final length, mm ± SE", x=0.04, y=0.9, angle=90, size=10) +
-  draw_label("Weekly reproduction\nrate ± SE", x=0.04, y=0.65, angle=90, size=10) +
-  draw_label("Cercarial production\nrate ± SE", x=0.04, y=0.45, angle=90, size=10) +
-  draw_label("Estimated Median\nsurvival, weeks ± SE", x=0.04, y=0.15, angle=90, size=10) +
+  draw_label("Final length, mm ± SE", x=0.03, y=0.88, angle=90, size=10) +
+  draw_label("Weekly reproduction\nrate ± SE", x=0.03, y=0.64, angle=90, size=10) +
+    draw_label("Proportion of hosts\nsurviving experiment ± SE", x=0.03, y=0.4, angle=90, size=10) +
+  draw_label("Cercarial production\nrate ± SE", x=0.03, y=0.15, angle=90, size=10) +
+  
+  # x-axis tick labels
+  draw_label("2-day", x=0.18, y=0.05, size=8)+
+  draw_label("21-day", x=0.26, y=0.05, size=8)+
+  draw_label("49-day", x=0.35, y=0.05, size=8)+
+  draw_label("LF", x=0.435, y=0.05, size=8)+
+  
+  draw_label("2-day", x=0.18+0.5, y=0.05+0.24, size=8)+
+  draw_label("21-day", x=0.26+0.5, y=0.05+0.24, size=8)+
+  draw_label("49-day", x=0.35+0.5, y=0.05+0.24, size=8)+
+  draw_label("LF", x=0.435+0.5, y=0.05+0.24, size=8)+
+  
   # x-axis labels
-  draw_label("Food resource", x = 0.55, y = 0.02, size=10) +
+  draw_label("Food resource", x = 0.55, y = 0.01, size=10, vjust=0) +
   # panel labels
-  draw_label("A", x = 0.2, y = 0.99, size=10) + 
-  draw_label("B", x = 0.2, y = 0.75, size=10) +
-  draw_label("C", x = 0.2, y = 0.5, size=10) +
-  draw_label("D", x = 0.2, y = 0.25, size=10)
+  draw_label("A", x = 0.16, y = 0.97, size=10) + 
+  draw_label("B", x = 0.66, y = 0.97, size=10) + 
+  draw_label("C", x = 0.16, y = 0.73, size=10) +
+  draw_label("D", x = 0.66, y = 0.73, size=10) +
+  draw_label("E", x = 0.16, y = 0.49, size=10) +
+  draw_label("F", x = 0.66, y = 0.49, size=10) +
+  draw_label("G", x = 0.16, y = 0.25, size=10)
 
-setwd("C:/RData")
-save_plot("Fig2_Detritus.png", Fig2, ncol=1, nrow=3, base_height=2, base_aspect_ratio = 1.75, dpi=600, units="in")
+save_plot("C:/RData/Fig2_Detritus.png", Fig1, ncol=2, nrow=4, base_height=2, base_asp = 1.1, dpi=600, units="in")
 
 ```
 
